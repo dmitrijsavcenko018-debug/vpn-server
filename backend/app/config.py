@@ -7,11 +7,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
+    # Пароль синхронизирован с db в docker-compose.yml (POSTGRES_PASSWORD: vpnpass123)
     db_host: str = "db"
     db_port: int = 5432
     db_name: str = "vpn"
     db_user: str = "vpn"
-    db_password: str = "vpn"
+    db_password: str = "vpnpass123"
 
     wg_host: str = "vpn.example.com"
     wg_port: int = 51820
