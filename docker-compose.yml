@@ -14,26 +14,19 @@ services:
       retries: 5
 
   backend:
-    build:
-      context: ./backend
-    env_file:
-      - .env
+    build: ./backend
+    restart: always
     depends_on:
-      db:
-        condition: service_healthy
+      - db
     ports:
       - "8000:8000"
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    volumes:
+      - /etc/wireguard:/etc/wireguard
     cap_add:
       - NET_ADMIN
       - SYS_MODULE
     devices:
       - /dev/net/tun:/dev/net/tun
-    volumes:
-      - ./backend/app:/app/app
-      - ./backend/alembic:/app/alembic
-      - ./backend/alembic.ini:/app/alembic.ini
-      - /etc/wireguard:/etc/wireguard
 
   bot:
     build:
