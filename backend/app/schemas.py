@@ -43,3 +43,4 @@ class VpnConfigResponse(BaseModel):
     address: str
     config: str
     config_url: str | None = None
+    expires_at: str | None = None  # ISO формат даты окончания подписки

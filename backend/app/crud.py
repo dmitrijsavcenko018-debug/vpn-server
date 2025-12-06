@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import Subscription, User, VpnPeer
 from .config import settings
-from .wireguard_ssh import add_peer_to_wg0
+from .wireguard_ssh import add_peer_to_wg0, remove_peer_from_wg0
 
 logger = logging.getLogger(__name__)
 
@@ -139,8 +139,18 @@ async def activate_test_subscription(session: AsyncSession, user: User) -> Subsc
 
 
 async def get_vpn_peer_by_user_id(session: AsyncSession, user_id: int) -> VpnPeer | None:
+    """
+    Получает активный (не отозванный) VPN peer для пользователя.
+    Возвращает самый свежий активный peer.
+    """
     result = await session.execute(
-        select(VpnPeer).where(VpnPeer.user_id == user_id, VpnPeer.revoked_at.is_(None)).order_by(VpnPeer.created_at.desc())
+        select(VpnPeer)
+        .where(
+            VpnPeer.user_id == user_id,
+            VpnPeer.revoked_at.is_(None),
+            VpnPeer.is_active == True
+        )
+        .order_by(VpnPeer.created_at.desc())
     )
     return result.scalar_one_or_none()
 
@@ -225,8 +235,9 @@ async def create_vpn_peer_for_user(session: AsyncSession, user_id: int) -> VpnPe
     )
     existing_addresses = {peer.address for peer in existing_peers.scalars().all()}
     
-    # Генерируем уникальный IP от 10.66.66.2 до 10.66.66.254
-    host_id = 2
+    # Генерируем уникальный IP от 10.66.66.10 до 10.66.66.254
+    # Начинаем с 10, чтобы не трогать тестовые peers (1-9 зарезервированы)
+    host_id = 10
     while host_id <= 254:
         address = f"10.66.66.{host_id}/32"
         if address not in existing_addresses:
@@ -234,7 +245,7 @@ async def create_vpn_peer_for_user(session: AsyncSession, user_id: int) -> VpnPe
         host_id += 1
     else:
         logger.error(f"[create_vpn_peer_for_user] Не удалось найти свободный IP для user_id={user_id}")
-        raise Exception("No available IP addresses in range 10.66.66.2-254")
+        raise Exception("No available IP addresses in range 10.66.66.10-254")
     
     peer = VpnPeer(
         user_id=user_id,
@@ -269,3 +280,98 @@ async def create_vpn_peer_for_user(session: AsyncSession, user_id: int) -> VpnPe
     await session.commit()
     await session.refresh(peer)
     return peer
+
+
+async def revoke_wireguard_peer(session: AsyncSession, peer: VpnPeer) -> bool:
+    """
+    Отзывает (удаляет) WireGuard peer при окончании подписки.
+    
+    1. Удаляет блок [Peer] с данным public_key из wg0.conf по SSH.
+    2. Делает wg syncconf wg0 для синхронизации конфигурации.
+    3. Устанавливает peer.revoked_at и is_active=False в БД.
+    
+    Args:
+        session: Сессия БД
+        peer: VpnPeer для отзыва
+    
+    Returns:
+        True если успешно, False в случае ошибки
+    """
+    if peer.is_revoked:
+        logger.warning(f"[revoke_wireguard_peer] Peer {peer.id} уже отозван")
+        return True
+    
+    try:
+        # 1. Удаляем peer из WireGuard конфигурации на сервере через SSH
+        success = remove_peer_from_wg0(
+            ssh_host=settings.ssh_host,
+            ssh_user=settings.ssh_user,
+            ssh_key_path=settings.ssh_key_path,
+            ssh_password=settings.ssh_password,
+            public_key=peer.public_key,
+            wg_config_path=settings.wg_config_path
+        )
+        
+        if not success:
+            logger.warning(f"[revoke_wireguard_peer] Не удалось удалить peer {peer.id} с сервера, но помечаем как отозванный в БД")
+        else:
+            logger.info(f"[revoke_wireguard_peer] Peer {peer.id} успешно удален с WireGuard сервера")
+        
+        # 2. Помечаем peer как отозванный в БД
+        from datetime import datetime
+        peer.revoked_at = datetime.utcnow()
+        peer.is_active = False
+        await session.commit()
+        await session.refresh(peer)
+        
+        return True
+        
+    except Exception as e:
+        logger.error(f"[revoke_wireguard_peer] Ошибка при отзыве peer {peer.id}: {e}")
+        # Все равно помечаем как отозванный в БД
+        try:
+            from datetime import datetime
+            peer.revoked_at = datetime.utcnow()
+            peer.is_active = False
+            await session.commit()
+        except Exception as db_error:
+            logger.error(f"[revoke_wireguard_peer] Ошибка при обновлении БД: {db_error}")
+        return False
+
+
+async def revoke_expired_peers(session: AsyncSession) -> int:
+    """
+    Находит всех пользователей с истекшими подписками и отзывает их peers.
+    Вызывается по крону или планировщику.
+    
+    Returns:
+        Количество отозванных peers
+    """
+    from datetime import datetime
+    now = datetime.utcnow()
+    revoked_count = 0
+    
+    # Находим всех пользователей с истекшими подписками
+    expired_subscriptions = await session.execute(
+        select(Subscription)
+        .where(Subscription.expires_at < now, Subscription.status == "active")
+    )
+    expired_subs = expired_subscriptions.scalars().all()
+    
+    # Для каждого пользователя с истекшей подпиской отзываем peer
+    for subscription in expired_subs:
+        # Помечаем подписку как неактивную
+        subscription.status = "expired"
+        
+        # Находим активный peer пользователя
+        peer = await get_vpn_peer_by_user_id(session, subscription.user_id)
+        if peer and not peer.is_revoked:
+            try:
+                await revoke_wireguard_peer(session, peer)
+                revoked_count += 1
+                logger.info(f"[revoke_expired_peers] Отозван peer {peer.id} для user_id={subscription.user_id}")
+            except Exception as e:
+                logger.error(f"[revoke_expired_peers] Ошибка при отзыве peer для user_id={subscription.user_id}: {e}")
+    
+    await session.commit()
+    return revoked_count

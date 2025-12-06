@@ -10,10 +10,15 @@ from ..deps import get_session
 router = APIRouter(prefix="/api/vpn", tags=["vpn"])
 
 
-def _render_config(private_key: str, address: str) -> str:
+def _render_config(private_key: str, address: str, preshared_key: str | None = None) -> str:
     """
-    Генерирует WireGuard конфиг для клиента.
+    Генерирует WireGuard конфиг для клиента ТОЛЬКО из данных БД.
     Включает AllowedIPs и PersistentKeepalive для корректной работы VPN.
+    
+    Args:
+        private_key: Приватный ключ клиента из БД
+        address: IP адрес клиента из БД (например, 10.66.66.10/32)
+        preshared_key: Preshared ключ из БД (опционально)
     """
     # Убеждаемся, что address содержит /32
     if not address.endswith("/32"):
@@ -24,17 +29,26 @@ def _render_config(private_key: str, address: str) -> str:
             # Если нет префикса, добавляем /32
             address = address + "/32"
     
-    return (
+    config = (
         "[Interface]\n"
         f"PrivateKey = {private_key}\n"
         f"Address = {address}\n"
         "DNS = 1.1.1.1\n\n"
         "[Peer]\n"
         f"PublicKey = {settings.wg_public_key}\n"
+    )
+    
+    # Добавляем PresharedKey только если он есть в БД
+    if preshared_key:
+        config += f"PresharedKey = {preshared_key}\n"
+    
+    config += (
         f"Endpoint = {settings.wg_host}:{settings.wg_port}\n"
         "AllowedIPs = 0.0.0.0/0, ::/0\n"
         "PersistentKeepalive = 25\n"
     )
+    
+    return config
 
 
 @router.get("/config/{telegram_id}", response_model=schemas.VpnConfigResponse)
@@ -52,6 +66,13 @@ async def get_vpn_config(telegram_id: int, session: AsyncSession = Depends(get_s
         # 2. Проверяем наличие активной подписки (поддерживает test_1d и обычные тарифы)
         subscription = await crud.get_active_subscription(session, user.id)
         if not subscription:
+            # Если подписка истекла, отзываем peer (если есть)
+            peer_to_revoke = await crud.get_vpn_peer_by_user_id(session, user.id)
+            if peer_to_revoke and not peer_to_revoke.is_revoked:
+                try:
+                    await crud.revoke_wireguard_peer(session, peer_to_revoke)
+                except Exception as e:
+                    print(f"[get_vpn_config] Ошибка при отзыве peer для истекшей подписки: {e}")
             raise HTTPException(status_code=403, detail="Active subscription required")
         
         # 3. Получаем или создаем VPN peer
@@ -75,9 +96,13 @@ async def get_vpn_config(telegram_id: int, session: AsyncSession = Depends(get_s
                 detail="VPN peer configuration is incomplete"
             )
         
-        # 5. Генерируем конфиг
+        # 5. Генерируем конфиг ТОЛЬКО из данных БД
         try:
-            config_text = _render_config(peer.private_key, peer.address)
+            config_text = _render_config(
+                private_key=peer.private_key,
+                address=peer.address,
+                preshared_key=peer.preshared_key
+            )
         except Exception as e:
             print(f"[get_vpn_config] Ошибка при генерации конфига для user_id={user.id}:")
             traceback.print_exc()
@@ -89,13 +114,17 @@ async def get_vpn_config(telegram_id: int, session: AsyncSession = Depends(get_s
         # 6. Формируем ссылку на raw конфиг
         config_url = f"{settings.public_base_url}/api/vpn/config-raw/{telegram_id}"
         
-        # 7. Возвращаем результат
+        # 7. Форматируем expires_at для ответа
+        expires_at_str = subscription.expires_at.isoformat() if subscription else None
+        
+        # 8. Возвращаем результат
         return schemas.VpnConfigResponse(
             user_id=user.id,
             peer_id=peer.id,
             address=peer.address,
             config=config_text,
-            config_url=config_url
+            config_url=config_url,
+            expires_at=expires_at_str
         )
         
     except HTTPException:
@@ -128,6 +157,13 @@ async def get_vpn_config_raw(telegram_id: int, session: AsyncSession = Depends(g
         # 2. Проверяем наличие активной подписки
         subscription = await crud.get_active_subscription(session, user.id)
         if not subscription:
+            # Если подписка истекла, отзываем peer (если есть)
+            peer_to_revoke = await crud.get_vpn_peer_by_user_id(session, user.id)
+            if peer_to_revoke and not peer_to_revoke.is_revoked:
+                try:
+                    await crud.revoke_wireguard_peer(session, peer_to_revoke)
+                except Exception as e:
+                    print(f"[get_vpn_config_raw] Ошибка при отзыве peer для истекшей подписки: {e}")
             raise HTTPException(status_code=403, detail="Active subscription required")
         
         # 3. Получаем или создаем VPN peer
@@ -150,9 +186,13 @@ async def get_vpn_config_raw(telegram_id: int, session: AsyncSession = Depends(g
                 detail="VPN peer configuration is incomplete"
             )
         
-        # 5. Генерируем конфиг
+        # 5. Генерируем конфиг ТОЛЬКО из данных БД
         try:
-            config_text = _render_config(peer.private_key, peer.address)
+            config_text = _render_config(
+                private_key=peer.private_key,
+                address=peer.address,
+                preshared_key=peer.preshared_key
+            )
         except Exception as e:
             print(f"[get_vpn_config_raw] Ошибка при генерации конфига для user_id={user.id}:")
             traceback.print_exc()
