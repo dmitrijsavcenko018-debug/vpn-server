@@ -55,9 +55,9 @@ def add_peer_to_wg0(
             # Локальное выполнение: используем subprocess с stdin
             try:
                 logger.info(f"[add_peer_to_wg0] Добавляю peer {public_key[:20]}... локально через wg set")
-                # Выполняем wg set с preshared_key через stdin
+                # Выполняем wg set с preshared_key через stdin (без sudo, т.к. контейнер запущен от root)
                 wg_set_process = subprocess.Popen(
-                    ["sudo", "wg", "set", interface, "peer", public_key, "allowed-ips", allowed_ips, "preshared-key", "/dev/stdin"],
+                    ["wg", "set", interface, "peer", public_key, "allowed-ips", allowed_ips, "preshared-key", "/dev/stdin"],
                     stdin=subprocess.PIPE,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
@@ -70,7 +70,7 @@ def add_peer_to_wg0(
                 
                 # Сохраняем конфигурацию
                 save_result = subprocess.run(
-                    ["sudo", "wg-quick", "save", interface],
+                    ["wg-quick", "save", interface],
                     capture_output=True,
                     text=True,
                     timeout=10,
@@ -92,9 +92,9 @@ def add_peer_to_wg0(
             # Локальное выполнение без preshared_key
             try:
                 logger.info(f"[add_peer_to_wg0] Добавляю peer {public_key[:20]}... локально через wg set")
-                # Выполняем wg set
+                # Выполняем wg set (без sudo, т.к. контейнер запущен от root)
                 wg_set_result = subprocess.run(
-                    ["sudo", "wg", "set", interface, "peer", public_key, "allowed-ips", allowed_ips],
+                    ["wg", "set", interface, "peer", public_key, "allowed-ips", allowed_ips],
                     capture_output=True,
                     text=True,
                     timeout=10,
@@ -103,7 +103,7 @@ def add_peer_to_wg0(
                 
                 # Сохраняем конфигурацию
                 save_result = subprocess.run(
-                    ["sudo", "wg-quick", "save", interface],
+                    ["wg-quick", "save", interface],
                     capture_output=True,
                     text=True,
                     timeout=10,
@@ -219,9 +219,9 @@ def remove_peer_from_wg0(
         # Локальное выполнение
         try:
             logger.info(f"[remove_peer_from_wg0] Удаляю peer {public_key[:20]}... локально через wg set")
-            # Удаляем peer
+            # Удаляем peer (без sudo, т.к. контейнер запущен от root)
             remove_result = subprocess.run(
-                ["sudo", "wg", "set", interface, "peer", public_key, "remove"],
+                ["wg", "set", interface, "peer", public_key, "remove"],
                 capture_output=True,
                 text=True,
                 timeout=10,
@@ -230,7 +230,7 @@ def remove_peer_from_wg0(
             
             # Сохраняем конфигурацию
             save_result = subprocess.run(
-                ["sudo", "wg-quick", "save", interface],
+                ["wg-quick", "save", interface],
                 capture_output=True,
                 text=True,
                 timeout=10,
