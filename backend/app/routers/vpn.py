@@ -76,12 +76,16 @@ async def get_vpn_config(telegram_id: int, session: AsyncSession = Depends(get_s
             raise HTTPException(status_code=403, detail="Active subscription required")
         
         # 3. Получаем или создаем VPN peer
+        # ВАЖНО: create_vpn_peer_for_user добавляет peer на сервер через wg set + wg-quick save
+        # Peer сохраняется в БД ТОЛЬКО после успешного добавления на сервер
+        # Если добавление не удалось - выбрасывается исключение, конфиг НЕ выдается
         peer = await crud.get_vpn_peer_by_user_id(session, user.id)
         if not peer:
             try:
+                # Создает peer: генерирует ключи → wg set wg0 peer ... → wg-quick save wg0 → сохраняет в БД
                 peer = await crud.create_vpn_peer_for_user(session, user.id)
             except Exception as e:
-                # Логируем ошибку создания peer
+                # Если не удалось добавить peer на сервер - конфиг НЕ выдаем
                 print(f"[get_vpn_config] Ошибка при создании VPN peer для user_id={user.id}:")
                 traceback.print_exc()
                 raise HTTPException(
@@ -90,6 +94,7 @@ async def get_vpn_config(telegram_id: int, session: AsyncSession = Depends(get_s
                 )
         
         # 4. Проверяем, что у peer есть необходимые данные
+        # Если peer в БД - значит он уже успешно добавлен на сервер
         if not peer.private_key or not peer.address:
             raise HTTPException(
                 status_code=500,
@@ -97,6 +102,7 @@ async def get_vpn_config(telegram_id: int, session: AsyncSession = Depends(get_s
             )
         
         # 5. Генерируем конфиг ТОЛЬКО из данных БД
+        # Peer уже добавлен на сервер, можно безопасно выдавать конфиг
         try:
             config_text = _render_config(
                 private_key=peer.private_key,
@@ -118,13 +124,14 @@ async def get_vpn_config(telegram_id: int, session: AsyncSession = Depends(get_s
         expires_at_str = subscription.expires_at.isoformat() if subscription else None
         
         # 8. Возвращаем результат
+        # Убираем /32 из адреса для ip_address (если есть)
+        ip_address = peer.address.replace("/32", "") if peer.address.endswith("/32") else peer.address
+        
         return schemas.VpnConfigResponse(
-            user_id=user.id,
-            peer_id=peer.id,
-            address=peer.address,
             config=config_text,
-            config_url=config_url,
-            expires_at=expires_at_str
+            ip_address=ip_address,
+            expires_at=expires_at_str,
+            config_url=config_url
         )
         
     except HTTPException:
@@ -167,11 +174,16 @@ async def get_vpn_config_raw(telegram_id: int, session: AsyncSession = Depends(g
             raise HTTPException(status_code=403, detail="Active subscription required")
         
         # 3. Получаем или создаем VPN peer
+        # ВАЖНО: create_vpn_peer_for_user добавляет peer на сервер через wg set + wg-quick save
+        # Peer сохраняется в БД ТОЛЬКО после успешного добавления на сервер
+        # Если добавление не удалось - выбрасывается исключение, конфиг НЕ выдается
         peer = await crud.get_vpn_peer_by_user_id(session, user.id)
         if not peer:
             try:
+                # Создает peer: генерирует ключи → wg set wg0 peer ... → wg-quick save wg0 → сохраняет в БД
                 peer = await crud.create_vpn_peer_for_user(session, user.id)
             except Exception as e:
+                # Если не удалось добавить peer на сервер - конфиг НЕ выдаем
                 print(f"[get_vpn_config_raw] Ошибка при создании VPN peer для user_id={user.id}:")
                 traceback.print_exc()
                 raise HTTPException(
@@ -180,6 +192,7 @@ async def get_vpn_config_raw(telegram_id: int, session: AsyncSession = Depends(g
                 )
         
         # 4. Проверяем, что у peer есть необходимые данные
+        # Если peer в БД - значит он уже успешно добавлен на сервер
         if not peer.private_key or not peer.address:
             raise HTTPException(
                 status_code=500,
@@ -187,6 +200,7 @@ async def get_vpn_config_raw(telegram_id: int, session: AsyncSession = Depends(g
             )
         
         # 5. Генерируем конфиг ТОЛЬКО из данных БД
+        # Peer уже добавлен на сервер, можно безопасно выдавать конфиг
         try:
             config_text = _render_config(
                 private_key=peer.private_key,

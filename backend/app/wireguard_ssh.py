@@ -16,10 +16,11 @@ def add_peer_to_wg0(
     public_key: str = "",
     preshared_key: str = "",
     allowed_ips: str = "",
+    interface: str = "wg0",
     wg_config_path: str = "/etc/wireguard/wg0.conf"
 ) -> bool:
     """
-    Добавляет peer в WireGuard конфигурацию через SSH.
+    Добавляет peer в WireGuard конфигурацию через SSH используя wg set.
     
     Args:
         ssh_host: SSH хост (IP или домен)
@@ -29,7 +30,8 @@ def add_peer_to_wg0(
         public_key: Публичный ключ клиента
         preshared_key: Preshared ключ
         allowed_ips: IP адрес клиента (например, 10.66.66.2/32)
-        wg_config_path: Путь к конфигурации WireGuard на сервере
+        interface: Имя интерфейса WireGuard (по умолчанию wg0)
+        wg_config_path: Путь к конфигурации WireGuard на сервере (для сохранения)
     
     Returns:
         True если успешно, False в случае ошибки
@@ -38,19 +40,21 @@ def add_peer_to_wg0(
         logger.error("[add_peer_to_wg0] Отсутствуют обязательные параметры: public_key или allowed_ips")
         return False
     
-    # Формируем секцию peer для добавления
-    peer_section = f"\n[Peer]\nPublicKey = {public_key}\n"
+    # Формируем команду wg set для добавления peer
+    # wg set wg0 peer <public_key> allowed-ips <allowed_ips>/32 [preshared-key <psk>]
     if preshared_key:
-        peer_section += f"PresharedKey = {preshared_key}\n"
-    peer_section += f"AllowedIPs = {allowed_ips}\n"
+        # Если есть preshared_key, передаем его через stdin
+        # Используем printf для более надежной передачи (echo может интерпретировать специальные символы)
+        wg_set_cmd = f"printf '%s' '{preshared_key}' | sudo wg set {interface} peer {public_key} allowed-ips {allowed_ips} preshared-key /dev/stdin"
+    else:
+        wg_set_cmd = f"sudo wg set {interface} peer {public_key} allowed-ips {allowed_ips}"
     
-    # Формируем команду для добавления peer в конфиг
-    # Используем echo для добавления в конец файла
-    add_peer_cmd = f"echo '{peer_section}' | sudo tee -a {wg_config_path} > /dev/null"
+    # Сохраняем конфигурацию на диск, чтобы после перезагрузки не пропало
+    # wg-quick save wg0 сохраняет текущую конфигурацию в файл
+    save_cmd = f"sudo wg-quick save {interface}"
     
-    # Команда для синхронизации конфигурации WireGuard без перезапуска
-    # Используем временный файл, так как process substitution может не работать через SSH
-    sync_cmd = "sudo bash -c 'wg-quick strip wg0 > /tmp/wg0_stripped.conf && wg syncconf wg0 /tmp/wg0_stripped.conf && rm -f /tmp/wg0_stripped.conf'"
+    # Объединяем команды
+    full_cmd = f"{wg_set_cmd} && {save_cmd}"
     
     # Формируем SSH команду
     if ssh_key_path:
@@ -61,7 +65,7 @@ def add_peer_to_wg0(
             "-o", "UserKnownHostsFile=/dev/null",
             "-o", "ConnectTimeout=10",
             f"{ssh_user}@{ssh_host}",
-            f"{add_peer_cmd} && {sync_cmd}"
+            full_cmd
         ]
     elif ssh_password:
         # Используем sshpass для пароля
@@ -72,14 +76,14 @@ def add_peer_to_wg0(
             "-o", "UserKnownHostsFile=/dev/null",
             "-o", "ConnectTimeout=10",
             f"{ssh_user}@{ssh_host}",
-            f"{add_peer_cmd} && {sync_cmd}"
+            full_cmd
         ]
     else:
         logger.error("[add_peer_to_wg0] Не указан ни ssh_key_path, ни ssh_password")
         return False
     
     try:
-        logger.info(f"[add_peer_to_wg0] Добавляю peer {public_key[:20]}... на {ssh_host}")
+        logger.info(f"[add_peer_to_wg0] Добавляю peer {public_key[:20]}... на {ssh_host} через wg set")
         result = subprocess.run(
             ssh_cmd,
             capture_output=True,
@@ -109,10 +113,11 @@ def remove_peer_from_wg0(
     ssh_key_path: Optional[str] = None,
     ssh_password: Optional[str] = None,
     public_key: str = "",
+    interface: str = "wg0",
     wg_config_path: str = "/etc/wireguard/wg0.conf"
 ) -> bool:
     """
-    Удаляет peer из WireGuard конфигурации через SSH.
+    Удаляет peer из WireGuard конфигурации через SSH используя wg set.
     
     Args:
         ssh_host: SSH хост
@@ -120,7 +125,8 @@ def remove_peer_from_wg0(
         ssh_key_path: Путь к SSH приватному ключу
         ssh_password: SSH пароль
         public_key: Публичный ключ клиента для удаления
-        wg_config_path: Путь к конфигурации WireGuard
+        interface: Имя интерфейса WireGuard (по умолчанию wg0)
+        wg_config_path: Путь к конфигурации WireGuard (для сохранения)
     
     Returns:
         True если успешно, False в случае ошибки
@@ -129,19 +135,15 @@ def remove_peer_from_wg0(
         logger.error("[remove_peer_from_wg0] Отсутствует public_key")
         return False
     
-    # Команда для удаления peer по PublicKey
-    # Используем sed для удаления секции [Peer] с указанным PublicKey
-    # Экранируем специальные символы в public_key для sed
-    escaped_public_key = public_key.replace("/", "\\/").replace(".", "\\.")
-    remove_peer_cmd = (
-        f"sudo sed -i '/^\\[Peer\\]$/,/^$/ {{ "
-        f"/PublicKey = {escaped_public_key}/,"
-        f"/^$/d; }}' {wg_config_path}"
-    )
+    # Команда для удаления peer через wg set
+    # wg set wg0 peer <public_key> remove
+    remove_peer_cmd = f"sudo wg set {interface} peer {public_key} remove"
     
-    # Команда для синхронизации конфигурации
-    # Используем временный файл, так как process substitution может не работать через SSH
-    sync_cmd = "sudo bash -c 'wg-quick strip wg0 > /tmp/wg0_stripped.conf && wg syncconf wg0 /tmp/wg0_stripped.conf && rm -f /tmp/wg0_stripped.conf'"
+    # Сохраняем конфигурацию на диск
+    save_cmd = f"sudo wg-quick save {interface}"
+    
+    # Объединяем команды
+    full_cmd = f"{remove_peer_cmd} && {save_cmd}"
     
     # Формируем SSH команду
     if ssh_key_path:
@@ -152,7 +154,7 @@ def remove_peer_from_wg0(
             "-o", "UserKnownHostsFile=/dev/null",
             "-o", "ConnectTimeout=10",
             f"{ssh_user}@{ssh_host}",
-            f"{remove_peer_cmd} && {sync_cmd}"
+            full_cmd
         ]
     elif ssh_password:
         ssh_cmd = [
@@ -162,14 +164,14 @@ def remove_peer_from_wg0(
             "-o", "UserKnownHostsFile=/dev/null",
             "-o", "ConnectTimeout=10",
             f"{ssh_user}@{ssh_host}",
-            f"{remove_peer_cmd} && {sync_cmd}"
+            full_cmd
         ]
     else:
         logger.error("[remove_peer_from_wg0] Не указан ни ssh_key_path, ни ssh_password")
         return False
     
     try:
-        logger.info(f"[remove_peer_from_wg0] Удаляю peer {public_key[:20]}... с {ssh_host}")
+        logger.info(f"[remove_peer_from_wg0] Удаляю peer {public_key[:20]}... с {ssh_host} через wg set")
         result = subprocess.run(
             ssh_cmd,
             capture_output=True,

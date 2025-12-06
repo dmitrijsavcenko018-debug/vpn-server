@@ -218,67 +218,96 @@ def _generate_preshared_key() -> str:
         return base64.b64encode(os.urandom(32)).decode("ascii")
 
 
+async def allocate_ip_address(session: AsyncSession, start_host: int = 10, end_host: int = 254) -> str:
+    """
+    Находит следующий свободный IP-адрес в диапазоне 10.66.66.{start_host}-{end_host}/32.
+    Проверяет существующие peers в БД для избежания конфликтов.
+    
+    Args:
+        session: Сессия БД
+        start_host: Начальный номер хоста (по умолчанию 10, чтобы не трогать тестовые peers)
+        end_host: Конечный номер хоста (по умолчанию 254)
+    
+    Returns:
+        IP-адрес в формате "10.66.66.X/32"
+    
+    Raises:
+        Exception: Если не удалось найти свободный IP
+    """
+    # Получаем все существующие активные peers
+    existing_peers = await session.execute(
+        select(VpnPeer).where(VpnPeer.revoked_at.is_(None), VpnPeer.is_active == True)
+    )
+    existing_addresses = {peer.address for peer in existing_peers.scalars().all()}
+    
+    # Ищем свободный IP от start_host до end_host
+    host_id = start_host
+    while host_id <= end_host:
+        address = f"10.66.66.{host_id}/32"
+        if address not in existing_addresses:
+            return address
+        host_id += 1
+    
+    # Если не нашли свободный IP
+    logger.error(f"[allocate_ip_address] Не удалось найти свободный IP в диапазоне 10.66.66.{start_host}-{end_host}")
+    raise Exception(f"No available IP addresses in range 10.66.66.{start_host}-{end_host}")
+
+
 async def create_vpn_peer_for_user(session: AsyncSession, user_id: int) -> VpnPeer:
     """
     Создает новый VPN peer для пользователя с уникальными ключами и IP-адресом.
     Автоматически добавляет peer в WireGuard конфигурацию на сервере через SSH.
+    
+    ВАЖНО: Peer сохраняется в БД ТОЛЬКО после успешного добавления на сервер.
+    Если добавление на сервер не удалось - выбрасывается исключение, peer не создается.
     """
-    # Генерируем правильные WireGuard ключи
+    # 1. Генерируем правильные WireGuard ключи
     private_key = _generate_private_key()
     public_key = _generate_public_key(private_key)  # Публичный ключ вычисляется из приватного
     preshared_key = _generate_preshared_key()
     
-    # Находим следующий доступный IP-адрес
-    # Проверяем существующие peers для избежания конфликтов
-    existing_peers = await session.execute(
-        select(VpnPeer).where(VpnPeer.revoked_at.is_(None))
-    )
-    existing_addresses = {peer.address for peer in existing_peers.scalars().all()}
-    
-    # Генерируем уникальный IP от 10.66.66.10 до 10.66.66.254
+    # 2. Находим следующий доступный IP-адрес
     # Начинаем с 10, чтобы не трогать тестовые peers (1-9 зарезервированы)
-    host_id = 10
-    while host_id <= 254:
-        address = f"10.66.66.{host_id}/32"
-        if address not in existing_addresses:
-            break
-        host_id += 1
-    else:
-        logger.error(f"[create_vpn_peer_for_user] Не удалось найти свободный IP для user_id={user_id}")
-        raise Exception("No available IP addresses in range 10.66.66.10-254")
+    address = await allocate_ip_address(session, start_host=10, end_host=254)
     
+    # 3. СНАЧАЛА добавляем peer в WireGuard конфигурацию на сервере через SSH
+    # wg set wg0 peer <public_key> allowed-ips <ip>/32 [preshared-key <psk>]
+    # затем wg-quick save wg0
+    logger.info(f"[create_vpn_peer_for_user] Добавляю peer на WireGuard сервер для user_id={user_id}")
+    success = add_peer_to_wg0(
+        ssh_host=settings.ssh_host,
+        ssh_user=settings.ssh_user,
+        ssh_key_path=settings.ssh_key_path,
+        ssh_password=settings.ssh_password,
+        public_key=public_key,
+        preshared_key=preshared_key or "",
+        allowed_ips=address,
+        interface="wg0",
+        wg_config_path=settings.wg_config_path
+    )
+    
+    # 4. Если не удалось добавить на сервер - выбрасываем исключение, peer НЕ создается
+    if not success:
+        error_msg = f"[create_vpn_peer_for_user] Не удалось добавить peer на WireGuard сервер для user_id={user_id}. Peer НЕ создан в БД."
+        logger.error(error_msg)
+        raise Exception(f"Failed to add peer to WireGuard server: {error_msg}")
+    
+    logger.info(f"[create_vpn_peer_for_user] Peer успешно добавлен на WireGuard сервер для user_id={user_id}")
+    
+    # 5. ТОЛЬКО после успешного добавления на сервер - сохраняем peer в БД
     peer = VpnPeer(
         user_id=user_id,
         private_key=private_key,
         public_key=public_key,
         preshared_key=preshared_key,
         address=address,
+        interface="wg0",  # По умолчанию используем wg0
     )
     session.add(peer)
-    await session.flush()
-    
-    # Добавляем peer в WireGuard конфигурацию на сервере через SSH
-    try:
-        success = add_peer_to_wg0(
-            ssh_host=settings.ssh_host,
-            ssh_user=settings.ssh_user,
-            ssh_key_path=settings.ssh_key_path,
-            ssh_password=settings.ssh_password,
-            public_key=public_key,
-            preshared_key=preshared_key or "",
-            allowed_ips=address,
-            wg_config_path=settings.wg_config_path
-        )
-        if not success:
-            logger.warning(f"[create_vpn_peer_for_user] Не удалось добавить peer на сервер для user_id={user_id}, но peer создан в БД")
-        else:
-            logger.info(f"[create_vpn_peer_for_user] Peer успешно добавлен на WireGuard сервер для user_id={user_id}")
-    except Exception as e:
-        logger.error(f"[create_vpn_peer_for_user] Ошибка при добавлении peer на сервер: {e}")
-        # Продолжаем выполнение - peer уже создан в БД, можно добавить на сервер позже
-    
     await session.commit()
     await session.refresh(peer)
+    
+    logger.info(f"[create_vpn_peer_for_user] Peer успешно создан в БД для user_id={user_id}, peer_id={peer.id}")
     return peer
 
 
@@ -309,6 +338,7 @@ async def revoke_wireguard_peer(session: AsyncSession, peer: VpnPeer) -> bool:
             ssh_key_path=settings.ssh_key_path,
             ssh_password=settings.ssh_password,
             public_key=peer.public_key,
+            interface=peer.interface,
             wg_config_path=settings.wg_config_path
         )
         

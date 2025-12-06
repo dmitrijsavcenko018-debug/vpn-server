@@ -42,6 +42,7 @@ class VpnPeer(Base):
     private_key: Mapped[str] = mapped_column(Text, nullable=False)
     preshared_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     address: Mapped[str] = mapped_column(String(32), nullable=False)
+    interface: Mapped[str] = mapped_column(String(10), nullable=False, default="wg0")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)

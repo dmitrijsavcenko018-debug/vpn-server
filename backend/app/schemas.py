@@ -38,9 +38,7 @@ class ActivateSubscriptionRequest(BaseModel):
 
 
 class VpnConfigResponse(BaseModel):
-    user_id: int
-    peer_id: int
-    address: str
     config: str
-    config_url: str | None = None
+    ip_address: str
     expires_at: str | None = None  # ISO формат даты окончания подписки
+    config_url: str | None = None
