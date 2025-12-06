@@ -20,7 +20,13 @@ def _render_config(private_key: str, address: str, preshared_key: str | None = N
         address: IP адрес клиента из БД (например, 10.66.66.10/32)
         preshared_key: Preshared ключ из БД (опционально)
     """
+    # Очищаем ключи от пробелов и переносов строк
+    private_key = private_key.strip()
+    if preshared_key:
+        preshared_key = preshared_key.strip()
+    
     # Убеждаемся, что address содержит /32
+    address = address.strip()
     if not address.endswith("/32"):
         if "/" in address:
             # Если есть другой префикс, заменяем на /32
@@ -29,24 +35,29 @@ def _render_config(private_key: str, address: str, preshared_key: str | None = N
             # Если нет префикса, добавляем /32
             address = address + "/32"
     
-    config = (
-        "[Interface]\n"
-        f"PrivateKey = {private_key}\n"
-        f"Address = {address}\n"
-        "DNS = 1.1.1.1\n\n"
-        "[Peer]\n"
-        f"PublicKey = {settings.wg_public_key}\n"
-    )
+    # Формируем конфиг с правильным форматированием
+    config_lines = [
+        "[Interface]",
+        f"PrivateKey = {private_key}",
+        f"Address = {address}",
+        "DNS = 1.1.1.1",
+        "",
+        "[Peer]",
+        f"PublicKey = {settings.wg_public_key.strip()}",
+    ]
     
     # Добавляем PresharedKey только если он есть в БД
     if preshared_key:
-        config += f"PresharedKey = {preshared_key}\n"
+        config_lines.append(f"PresharedKey = {preshared_key}")
     
-    config += (
-        f"Endpoint = {settings.wg_host}:{settings.wg_port}\n"
-        "AllowedIPs = 0.0.0.0/0, ::/0\n"
-        "PersistentKeepalive = 25\n"
-    )
+    config_lines.extend([
+        f"Endpoint = {settings.wg_host.strip()}:{settings.wg_port}",
+        "AllowedIPs = 0.0.0.0/0, ::/0",
+        "PersistentKeepalive = 25",
+    ])
+    
+    # Объединяем строки с переносами
+    config = "\n".join(config_lines) + "\n"
     
     return config
 
