@@ -1,35 +1,30 @@
-version: '3.8'
+version: "3.9"
 
 services:
   db:
     image: postgres:15-alpine
     restart: always
     environment:
-      POSTGRES_DB: ${DB_NAME}
-      POSTGRES_USER: ${DB_USER}
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - db_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   backend:
-    build:
-      context: ./backend
+    build: ./backend
     restart: always
-    env_file:
-      - .env
     depends_on:
       - db
     ports:
       - "8000:8000"
-    volumes:
-      - /etc/wireguard:/etc/wireguard
-    cap_add:
-      - NET_ADMIN
-      - SYS_MODULE
-    devices:
-      - /dev/net/tun:/dev/net/tun
+    env_file:
+      - .env
     environment:
       DB_HOST: ${DB_HOST}
       DB_PORT: ${DB_PORT}
@@ -39,11 +34,17 @@ services:
       WG_HOST: ${WG_HOST}
       WG_PORT: ${WG_PORT}
       WG_PUBLIC_KEY: ${WG_PUBLIC_KEY}
+    volumes:
+      - /etc/wireguard:/etc/wireguard
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    devices:
+      - /dev/net/tun:/dev/net/tun
 
   bot:
     build:
       context: ./bot
-    restart: always
     env_file:
       - .env
     depends_on:
@@ -58,3 +59,4 @@ services:
 
 volumes:
   db_data:
+

@@ -1,0 +1,62 @@
+services:
+  db:
+    image: postgres:15-alpine
+    environment:
+      # Пароль синхронизирован с backend (см. backend environment)
+      POSTGRES_DB: vpn
+      POSTGRES_USER: vpn
+      POSTGRES_PASSWORD: vpnpass123
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vpn -d vpn"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build: ./backend
+    restart: always
+    depends_on:
+      - db
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      WG_HOST: ${WG_HOST}
+      WG_PORT: ${WG_PORT}
+      WG_PUBLIC_KEY: ${WG_PUBLIC_KEY}
+    environment:
+      # Пароль синхронизирован с db (POSTGRES_PASSWORD)
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: vpn
+      DB_USER: vpn
+      DB_PASSWORD: vpnpass123
+      DATABASE_URL: postgresql+asyncpg://vpn:vpnpass123@db:5432/vpn
+    volumes:
+      - /etc/wireguard:/etc/wireguard
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    devices:
+      - /dev/net/tun:/dev/net/tun
+
+  bot:
+    build:
+      context: ./bot
+    env_file:
+      - .env
+    depends_on:
+      - backend
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    extra_hosts:
+      - "api.telegram.org:149.154.167.220"
+      - "api.telegram.org:149.154.167.51"
+      - "api.telegram.org:149.154.175.100"
+
+volumes:
+  db_data:
