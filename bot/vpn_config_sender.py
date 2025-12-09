@@ -4,12 +4,14 @@
 """
 import traceback
 from datetime import datetime
+from html import escape
 import httpx
 from aiogram import Bot
-from aiogram.types import BufferedInputFile, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import BufferedInputFile
 from aiogram.enums import ParseMode
 
 from api_client import ApiClient
+from keyboards import config_kb
 
 # Создаем глобальный экземпляр api_client (будет переопределен в bot_main)
 api_client = None
@@ -41,7 +43,6 @@ async def send_vpn_config(bot: Bot, telegram_id: int, filename: str = "vpn.conf"
         # Получаем конфиг с backend (backend сам проверит подписку)
         vpn_config = await api_client.get_vpn_config(telegram_id=telegram_id)
         config_text = vpn_config.get("config")
-        config_url = vpn_config.get("config_url")
         expires_at_str = vpn_config.get("expires_at")  # Если backend отдаёт
         
         if not config_text:
@@ -55,56 +56,39 @@ async def send_vpn_config(bot: Bot, telegram_id: int, filename: str = "vpn.conf"
         # Логирование для проверки
         print(f"[send_vpn_config] DEBUG: Sending config file, length = {len(config_text)}")
         
-        # 1. Сообщение «VPN готов»
-        info_text = "Ваш VPN готов! 🎉\n\n"
-        
+        # Формируем дату окончания подписки
+        expire_date = ""
         if expires_at_str:
             try:
                 expires_at = datetime.fromisoformat(expires_at_str.replace("Z", "+00:00"))
-                expires_date = expires_at.strftime("%d.%m.%Y")
-                info_text += f"Подписка активна до: {expires_date}\n"
+                expire_date = expires_at.strftime("%d.%m.%Y")
             except Exception:
-                info_text += f"Подписка активна до: {expires_at_str}\n"
+                expire_date = expires_at_str
         
-        info_text += "Сервер: 🇳🇱 Нидерланды\n\n"
+        # Формируем текст сообщения с конфигом
+        message_text = ""
         
-        # Создаем клавиатуру с кнопкой "Скачать" (только если URL валидный, не localhost)
-        config_kb = None
-        if config_url and not config_url.startswith("http://localhost") and not config_url.startswith("https://localhost"):
-            try:
-                config_kb = InlineKeyboardMarkup(
-                    inline_keyboard=[
-                        [
-                            InlineKeyboardButton(
-                                text="📥 Скачать конфиг",
-                                url=config_url
-                            )
-                        ]
-                    ]
-                )
-                info_text += f"🔗 Ссылка на конфиг (скопируйте её и вставьте в приложение VPN):\n`{config_url}`\n\n"
-            except Exception as e:
-                print(f"[send_vpn_config] Ошибка создания кнопки: {e}")
-                if config_url:
-                    info_text += f"🔗 Ссылка на конфиг (скопируйте её и вставьте в приложение VPN):\n`{config_url}`\n\n"
-        elif config_url:
-            info_text += f"🔗 Ссылка на конфиг (скопируйте её и вставьте в приложение VPN):\n`{config_url}`\n\n"
+        if expire_date:
+            message_text += f"Подписка активна до: {expire_date}\n\n"
         
+        message_text += "🗝 Ваш VPN-конфиг (вставьте в приложение):\n\n"
+        # Экранируем специальные символы для HTML
+        message_text += f"<code>{escape(config_text)}</code>\n\n"
+        message_text += "📱 Скачайте приложение VPN:\n"
+        message_text += "iPhone (iOS): https://apps.apple.com/ru/app/wireguard/id1441195209\n"
+        message_text += "Android: https://play.google.com/store/apps/details?id=com.wireguard.android\n\n"
+        message_text += "👨‍💻 Техническая поддержка:\n"
+        message_text += "@support"  # Временно, можно заменить на настройку из config.py
+        
+        # Отправляем сообщение с конфигом и inline-клавиатурой
         await bot.send_message(
             chat_id=telegram_id,
-            text=info_text,
-            parse_mode=ParseMode.MARKDOWN,
+            text=message_text,
+            parse_mode=ParseMode.HTML,
             reply_markup=config_kb
         )
         
-        # 2. Текст конфига
-        await bot.send_message(
-            chat_id=telegram_id,
-            text=f"🗝 Ваш VPN-конфиг (вставьте в приложение):\n\n<code>{config_text}</code>",
-            parse_mode=ParseMode.HTML
-        )
-        
-        # 3. Файл vpn.conf
+        # Отправляем файл vpn.conf
         file = BufferedInputFile(
             config_text.encode("utf-8"),
             filename=filename

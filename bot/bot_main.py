@@ -34,7 +34,6 @@ from texts import (
     TEXT_LAPTOP_CONFIG,
     TEXT_ADD_DEVICE,
     TEXT_CONFIG_NO_ACCESS,
-    TEXT_CONFIG_LINK,
     TEXT_SUPPORT,
     TEXT_HELP,
 )
@@ -311,32 +310,6 @@ async def cmd_profile(message: Message):
     await message.answer("👤 Личный кабинет", reply_markup=kb.as_markup())
 
 
-@router.message(F.text == "🧪 Пробный доступ (1 день)")
-async def handle_trial_access(message: Message):
-    """Обработчик пробного доступа на 1 день"""
-    telegram_id = message.from_user.id
-    
-    try:
-        # Активируем тестовую подписку через backend
-        result = await api_client.activate_test_subscription(telegram_id=telegram_id)
-        
-        if result:
-            # После успешной активации отправляем конфиг
-            await send_vpn_config(message.bot, telegram_id)
-        else:
-            await message.answer(
-                "❌ Ошибка при активации пробного доступа.\n"
-                "Попробуйте позже или обратитесь в поддержку."
-            )
-    except Exception as e:
-        print(f"[handle_trial_access] Ошибка: {e}")
-        traceback.print_exc()
-        await message.answer(
-            "❌ Ошибка при активации пробного доступа.\n"
-            "Попробуйте позже или обратитесь в поддержку."
-        )
-
-
 # ===== Callback handlers =====
 
 @router.callback_query(F.data == "get_config")
@@ -467,7 +440,6 @@ async def cb_config_device(callback: CallbackQuery):
     
     kb = InlineKeyboardBuilder()
     kb.button(text="📄 Файл (.conf)", callback_data=f"config_file_{device_type}")
-    kb.button(text="🔗 Ссылка", callback_data=f"config_link_{device_type}")
     kb.button(text="🔙 Назад", callback_data="my_configs")
     kb.adjust(1)
     
@@ -484,51 +456,6 @@ async def cb_config_file(callback: CallbackQuery):
     
     # Отправляем конфиг (backend сам проверит подписку)
     await send_vpn_config(callback.bot, telegram_id, filename=f"vpn_{device_name.lower()}.conf")
-
-
-@router.callback_query(F.data.startswith("config_link_"))
-async def cb_config_link(callback: CallbackQuery):
-    """Обработчик получения ссылки на конфиг"""
-    await callback.answer()
-    device_type = callback.data.replace("config_link_", "")
-    user_id = callback.from_user.id
-    device_name = "Телефон" if device_type == "phone" else "Ноутбук"
-    
-    # Проверяем подписку
-    status, _ = await get_subscription_status(user_id)
-    if status != "active":
-        await callback.message.answer(
-            "❌ У вас нет активной подписки.\n"
-            "Сначала оформите подписку, чтобы получить конфиг."
-        )
-        return
-    
-    # Получаем config_url из backend
-    try:
-        config_data = await api_client.get_vpn_config(telegram_id=user_id)
-        config_url = config_data.get("config_url")
-        
-        if not config_url:
-            await callback.message.answer(
-                "❌ Ссылка на конфиг недоступна.\n"
-                "Попробуйте получить конфиг как файл."
-            )
-            return
-        
-        text = f"📱 *Конфиг — {device_name}*\n\n{TEXT_CONFIG_LINK.format(config_url=config_url)}"
-        
-        kb = InlineKeyboardBuilder()
-        kb.button(text="🔗 Открыть ссылку", url=config_url)
-        kb.button(text="🔙 Назад", callback_data=f"config_{device_type}")
-        kb.adjust(1)
-        
-        await callback.message.answer(text, reply_markup=kb.as_markup(), parse_mode=ParseMode.MARKDOWN)
-    except Exception as e:
-        print(f"[cb_config_link] Ошибка: {e}")
-        await callback.message.answer(
-            "❌ Ошибка при получении ссылки на конфиг.\n"
-            "Попробуйте получить конфиг как файл."
-        )
 
 
 @router.callback_query(F.data == "back_to_main")

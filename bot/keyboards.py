@@ -18,9 +18,6 @@ main_menu_keyboard = ReplyKeyboardMarkup(
         [
             KeyboardButton(text="👤 Личный кабинет"),
         ],
-        [
-            KeyboardButton(text="🧪 Пробный доступ (1 день)"),
-        ],
     ],
 )
 
@@ -113,27 +110,30 @@ configs_keyboard = InlineKeyboardMarkup(
 
 
 # =====================================
-# КНОПКИ "КОНФИГ ДЛЯ ТЕЛЕФОНА/НОУТБУКА" (inline)
+# КНОПКИ ДЛЯ VPN-КОНФИГА (inline)
 # =====================================
 
-config_delivery_keyboard = InlineKeyboardMarkup(
+# URL для техподдержки (можно заменить на настройку из config.py)
+SUPPORT_URL = "https://t.me/support"  # Временно, можно заменить на настройку
+
+config_kb = InlineKeyboardMarkup(
     inline_keyboard=[
         [
             InlineKeyboardButton(
-                text="📷 QR-код",
-                callback_data="config_qr",
+                text="📱 Скачать для iPhone",
+                url="https://apps.apple.com/ru/app/wireguard/id1441195209"
             )
         ],
         [
             InlineKeyboardButton(
-                text="📄 Файл (.conf)",
-                callback_data="config_file",
+                text="📱 Скачать для Android",
+                url="https://play.google.com/store/apps/details?id=com.wireguard.android"
             )
         ],
         [
             InlineKeyboardButton(
-                text="🔗 Ссылка",
-                callback_data="config_link",
+                text="👨‍💻 Техподдержка",
+                url=SUPPORT_URL
             )
         ],
     ]
