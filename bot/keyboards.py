@@ -114,30 +114,31 @@ configs_keyboard = InlineKeyboardMarkup(
 # =====================================
 
 # URL для техподдержки (можно заменить на настройку из config.py)
-SUPPORT_URL = "https://t.me/support"  # Временно, можно заменить на настройку
+SUPPORT_URL = "https://t.me/ТВОЙ_НИК_ТУТ"  # Замените на ваш Telegram username
 
-config_kb = InlineKeyboardMarkup(
+vpn_apps_kb = InlineKeyboardMarkup(
     inline_keyboard=[
         [
             InlineKeyboardButton(
                 text="📱 Скачать для iPhone",
                 url="https://apps.apple.com/ru/app/wireguard/id1441195209"
-            )
-        ],
-        [
+            ),
             InlineKeyboardButton(
                 text="📱 Скачать для Android",
                 url="https://play.google.com/store/apps/details?id=com.wireguard.android"
-            )
+            ),
         ],
         [
             InlineKeyboardButton(
                 text="👨‍💻 Техподдержка",
                 url=SUPPORT_URL
-            )
+            ),
         ],
     ]
 )
+
+# Для обратной совместимости
+config_kb = vpn_apps_kb
 
 
 # =====================================

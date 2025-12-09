@@ -11,7 +11,7 @@ from aiogram.types import BufferedInputFile
 from aiogram.enums import ParseMode
 
 from api_client import ApiClient
-from keyboards import config_kb
+from keyboards import vpn_apps_kb
 
 # Создаем глобальный экземпляр api_client (будет переопределен в bot_main)
 api_client = None
@@ -73,19 +73,14 @@ async def send_vpn_config(bot: Bot, telegram_id: int, filename: str = "vpn.conf"
         
         message_text += "🗝 Ваш VPN-конфиг (вставьте в приложение):\n\n"
         # Экранируем специальные символы для HTML
-        message_text += f"<code>{escape(config_text)}</code>\n\n"
-        message_text += "📱 Скачайте приложение VPN:\n"
-        message_text += "iPhone (iOS): https://apps.apple.com/ru/app/wireguard/id1441195209\n"
-        message_text += "Android: https://play.google.com/store/apps/details?id=com.wireguard.android\n\n"
-        message_text += "👨‍💻 Техническая поддержка:\n"
-        message_text += "@support"  # Временно, можно заменить на настройку из config.py
+        message_text += f"<code>{escape(config_text)}</code>"
         
         # Отправляем сообщение с конфигом и inline-клавиатурой
         await bot.send_message(
             chat_id=telegram_id,
             text=message_text,
             parse_mode=ParseMode.HTML,
-            reply_markup=config_kb
+            reply_markup=vpn_apps_kb
         )
         
         # Отправляем файл vpn.conf
