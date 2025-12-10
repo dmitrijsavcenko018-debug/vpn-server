@@ -462,6 +462,11 @@ async def cb_config_file(callback: CallbackQuery):
 async def cb_back_to_main(callback: CallbackQuery):
     """Обработчик кнопки 'Назад в главное меню'"""
     await callback.answer()
+    # Убираем inline-клавиатуру, если сообщение было с ней
+    try:
+        await callback.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
     await send_main_menu(callback.message)
 
 
