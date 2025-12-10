@@ -94,7 +94,14 @@ async def get_vpn_config(telegram_id: int, session: AsyncSession = Depends(get_s
         if not peer:
             try:
                 # Создает peer: генерирует ключи → wg set wg0 peer ... → wg-quick save wg0 → сохраняет в БД
-                peer = await crud.create_vpn_peer_for_user(session, user.id)
+                # Используем expires_at из подписки для expire_at пира
+                peer = await crud.create_vpn_peer_for_user(session, user.id, expire_at=subscription.expires_at)
+            except ValueError as e:
+                # Если у пользователя уже есть активный пир - возвращаем понятную ошибку
+                raise HTTPException(
+                    status_code=400,
+                    detail=str(e)
+                )
             except Exception as e:
                 # Если не удалось добавить peer на сервер - конфиг НЕ выдаем
                 print(f"[get_vpn_config] Ошибка при создании VPN peer для user_id={user.id}:")
@@ -192,7 +199,14 @@ async def get_vpn_config_raw(telegram_id: int, session: AsyncSession = Depends(g
         if not peer:
             try:
                 # Создает peer: генерирует ключи → wg set wg0 peer ... → wg-quick save wg0 → сохраняет в БД
-                peer = await crud.create_vpn_peer_for_user(session, user.id)
+                # Используем expires_at из подписки для expire_at пира
+                peer = await crud.create_vpn_peer_for_user(session, user.id, expire_at=subscription.expires_at)
+            except ValueError as e:
+                # Если у пользователя уже есть активный пир - возвращаем понятную ошибку
+                raise HTTPException(
+                    status_code=400,
+                    detail=str(e)
+                )
             except Exception as e:
                 # Если не удалось добавить peer на сервер - конфиг НЕ выдаем
                 print(f"[get_vpn_config_raw] Ошибка при создании VPN peer для user_id={user.id}:")

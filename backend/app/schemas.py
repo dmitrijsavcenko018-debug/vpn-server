@@ -21,6 +21,7 @@ class SubscriptionResponse(BaseModel):
     started_at: datetime
     expires_at: datetime
     created_at: datetime
+    reminder_3days_sent: bool = False
 
 
 class SubscriptionStatusResponse(BaseModel):
@@ -42,3 +43,33 @@ class VpnConfigResponse(BaseModel):
     ip_address: str
     expires_at: str | None = None  # ISO формат даты окончания подписки
     config_url: str | None = None
+
+
+class VpnPeerBase(BaseModel):
+    user_id: int
+    public_key: str
+    private_key: str
+    preshared_key: str | None = None
+    address: str
+    interface: str = "wg0"
+    expire_at: datetime | None = None
+    is_active: bool = True
+
+
+class VpnPeerCreate(BaseModel):
+    user_id: int
+    expire_at: datetime | None = None
+
+
+class VpnPeerRead(BaseModel):
+    id: int
+    user_id: int
+    public_key: str
+    private_key: str
+    preshared_key: str | None = None
+    address: str
+    interface: str
+    created_at: datetime
+    expire_at: datetime | None = None
+    revoked_at: datetime | None = None
+    is_active: bool

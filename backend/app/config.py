@@ -1,6 +1,7 @@
 from functools import lru_cache
 from urllib.parse import quote_plus
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -25,6 +26,10 @@ class Settings(BaseSettings):
     ssh_key_path: str | None = None  # Путь к SSH приватному ключу
     ssh_password: str | None = None  # SSH пароль (если не используется ключ)
     wg_config_path: str = "/etc/wireguard/wg0.conf"  # Путь к конфигурации WireGuard на сервере
+    
+    # Telegram Bot API
+    bot_token: str | None = Field(default=None, validation_alias="BOT_TOKEN")  # Токен Telegram бота для отправки уведомлений
+    admin_chat_id: int | None = Field(default=None, validation_alias="BACKEND_ADMIN_CHAT_ID")  # Chat ID администратора для получения алертов
 
     @property
     def database_url(self) -> str:

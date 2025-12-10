@@ -62,8 +62,15 @@ async def activate_subscription(
     # Если это новая подписка (peer еще не создан), создаем peer
     if is_new_subscription:
         try:
-            peer = await crud.create_vpn_peer_for_user(session, user.id)
+            # Используем expires_at из подписки для expire_at пира
+            peer = await crud.create_vpn_peer_for_user(session, user.id, expire_at=subscription.expires_at)
             # Peer автоматически добавляется на WireGuard сервер в create_vpn_peer_for_user
+        except ValueError as e:
+            # Если у пользователя уже есть активный пир - возвращаем ошибку
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"[activate_subscription] {e}")
+            raise HTTPException(status_code=400, detail=str(e))
         except Exception as e:
             # Логируем ошибку, но не прерываем активацию подписки
             import logging
@@ -97,8 +104,15 @@ async def activate_test_subscription(
     # Если это новая подписка (peer еще не создан), создаем peer
     if is_new_subscription:
         try:
-            peer = await crud.create_vpn_peer_for_user(session, user.id)
+            # Используем expires_at из подписки для expire_at пира
+            peer = await crud.create_vpn_peer_for_user(session, user.id, expire_at=subscription.expires_at)
             # Peer автоматически добавляется на WireGuard сервер в create_vpn_peer_for_user
+        except ValueError as e:
+            # Если у пользователя уже есть активный пир - возвращаем ошибку
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"[activate_test_subscription] {e}")
+            raise HTTPException(status_code=400, detail=str(e))
         except Exception as e:
             # Логируем ошибку, но не прерываем активацию подписки
             import logging

@@ -253,14 +253,24 @@ async def allocate_ip_address(session: AsyncSession, start_host: int = 10, end_h
     raise Exception(f"No available IP addresses in range 10.66.66.{start_host}-{end_host}")
 
 
-async def create_vpn_peer_for_user(session: AsyncSession, user_id: int) -> VpnPeer:
+async def create_vpn_peer_for_user(session: AsyncSession, user_id: int, expire_at: datetime | None = None) -> VpnPeer:
     """
     Создает новый VPN peer для пользователя с уникальными ключами и IP-адресом.
     Автоматически добавляет peer в WireGuard конфигурацию на сервере через SSH.
     
     ВАЖНО: Peer сохраняется в БД ТОЛЬКО после успешного добавления на сервер.
     Если добавление на сервер не удалось - выбрасывается исключение, peer не создается.
+    
+    Raises:
+        ValueError: Если у пользователя уже есть активный VPN-пир
     """
+    # 0. Проверяем, нет ли у пользователя уже активного пира
+    existing_peer = await get_vpn_peer_by_user_id(session, user_id)
+    if existing_peer:
+        error_msg = f"У пользователя user_id={user_id} уже есть активный VPN-пир (peer_id={existing_peer.id}). Нельзя создать новый, пока не отозван старый."
+        logger.warning(f"[create_vpn_peer_for_user] {error_msg}")
+        raise ValueError(error_msg)
+    
     # 1. Генерируем правильные WireGuard ключи
     private_key = _generate_private_key()
     public_key = _generate_public_key(private_key)  # Публичный ключ вычисляется из приватного
@@ -302,12 +312,32 @@ async def create_vpn_peer_for_user(session: AsyncSession, user_id: int) -> VpnPe
         preshared_key=preshared_key,
         address=address,
         interface="wg0",  # По умолчанию используем wg0
+        expire_at=expire_at,
     )
     session.add(peer)
     await session.commit()
     await session.refresh(peer)
     
     logger.info(f"[create_vpn_peer_for_user] Peer успешно создан в БД для user_id={user_id}, peer_id={peer.id}")
+    return peer
+
+
+async def update_vpn_peer_expire_at(session: AsyncSession, peer: VpnPeer, expire_at: datetime | None) -> VpnPeer:
+    """
+    Обновляет дату истечения срока действия VPN-пира.
+    
+    Args:
+        session: Сессия БД
+        peer: VpnPeer для обновления
+        expire_at: Новая дата истечения (может быть None для сброса)
+    
+    Returns:
+        Обновленный VpnPeer
+    """
+    peer.expire_at = expire_at
+    await session.commit()
+    await session.refresh(peer)
+    logger.info(f"[update_vpn_peer_expire_at] Обновлен expire_at для peer_id={peer.id}")
     return peer
 
 

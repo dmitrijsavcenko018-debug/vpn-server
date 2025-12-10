@@ -29,6 +29,7 @@ class Subscription(Base):
     started_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    reminder_3days_sent: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     user: Mapped["User"] = relationship(back_populates="subscriptions")
 
@@ -44,6 +45,7 @@ class VpnPeer(Base):
     address: Mapped[str] = mapped_column(String(32), nullable=False)
     interface: Mapped[str] = mapped_column(String(10), nullable=False, default="wg0")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    expire_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
