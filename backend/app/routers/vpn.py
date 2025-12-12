@@ -96,6 +96,9 @@ async def get_vpn_config(telegram_id: int, session: AsyncSession = Depends(get_s
                 # Создает peer: генерирует ключи → wg set wg0 peer ... → wg-quick save wg0 → сохраняет в БД
                 # Используем expires_at из подписки для expire_at пира
                 peer = await crud.create_vpn_peer_for_user(session, user.id, expire_at=subscription.expires_at)
+                # Коммитим peer в БД
+                await session.commit()
+                await session.refresh(peer)
             except ValueError as e:
                 # Если у пользователя уже есть активный пир - возвращаем понятную ошибку
                 raise HTTPException(
@@ -201,6 +204,9 @@ async def get_vpn_config_raw(telegram_id: int, session: AsyncSession = Depends(g
                 # Создает peer: генерирует ключи → wg set wg0 peer ... → wg-quick save wg0 → сохраняет в БД
                 # Используем expires_at из подписки для expire_at пира
                 peer = await crud.create_vpn_peer_for_user(session, user.id, expire_at=subscription.expires_at)
+                # Коммитим peer в БД
+                await session.commit()
+                await session.refresh(peer)
             except ValueError as e:
                 # Если у пользователя уже есть активный пир - возвращаем понятную ошибку
                 raise HTTPException(

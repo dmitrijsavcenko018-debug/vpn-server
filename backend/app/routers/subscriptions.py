@@ -1,8 +1,12 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import crud, schemas
 from ..deps import get_session
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/subscriptions", tags=["subscriptions"])
 
@@ -50,32 +54,47 @@ async def activate_subscription(
     
     user = await crud.get_or_create_user(session, telegram_id)
     
-    # Проверяем, есть ли уже активный peer
-    existing_peer = await crud.get_vpn_peer_by_user_id(session, user.id)
-    is_new_subscription = not existing_peer
-    
-    # Активируем подписку
+    # Активируем подписку (без commit - сделаем после создания peer)
     subscription = await crud.activate_subscription_by_months(session, user, request.months)
     if not subscription:
         raise HTTPException(status_code=500, detail="Unable to activate subscription")
+    
+    # Проверяем peer ПОСЛЕ активации подписки (чтобы избежать race condition)
+    existing_peer = await crud.get_vpn_peer_by_user_id(session, user.id)
+    is_new_subscription = not existing_peer
     
     # Если это новая подписка (peer еще не создан), создаем peer
     if is_new_subscription:
         try:
             # Используем expires_at из подписки для expire_at пира
+            # create_vpn_peer_for_user добавляет peer на WireGuard сервер, но НЕ делает commit
             peer = await crud.create_vpn_peer_for_user(session, user.id, expire_at=subscription.expires_at)
             # Peer автоматически добавляется на WireGuard сервер в create_vpn_peer_for_user
+            # После успешного создания peer делаем единый commit для подписки и peer
+            await session.commit()
+            await session.refresh(subscription)
+            await session.refresh(peer)
         except ValueError as e:
-            # Если у пользователя уже есть активный пир - возвращаем ошибку
-            import logging
-            logger = logging.getLogger(__name__)
+            # Если у пользователя уже есть активный пир - откатываем подписку и возвращаем ошибку
             logger.warning(f"[activate_subscription] {e}")
+            await session.rollback()
             raise HTTPException(status_code=400, detail=str(e))
         except Exception as e:
-            # Логируем ошибку, но не прерываем активацию подписки
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.error(f"[activate_subscription] Ошибка при создании peer для user_id={user.id}: {e}")
+            # Логируем ошибку и откатываем активацию подписки, если peer не создан
+            logger.error(
+                f"[activate_subscription] Ошибка при создании peer для user_id={user.id}: {e}",
+                exc_info=True
+            )
+            # ВАЖНО: Откатываем подписку, если peer не создан
+            await session.rollback()
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to create VPN peer. Subscription was not activated. Error: {str(e)}"
+            )
+    else:
+        # Если peer уже существует, просто коммитим подписку
+        await session.commit()
+        await session.refresh(subscription)
     
     return schemas.SubscriptionResponse.model_validate(subscription.__dict__, from_attributes=True)
 
@@ -92,31 +111,46 @@ async def activate_test_subscription(
     """
     user = await crud.get_or_create_user(session, telegram_id)
     
-    # Проверяем, есть ли уже активный peer
-    existing_peer = await crud.get_vpn_peer_by_user_id(session, user.id)
-    is_new_subscription = not existing_peer
-    
-    # Активируем тестовую подписку
+    # Активируем тестовую подписку (без commit - сделаем после создания peer)
     subscription = await crud.activate_test_subscription(session, user)
     if not subscription:
         raise HTTPException(status_code=500, detail="Unable to activate test subscription")
+    
+    # Проверяем peer ПОСЛЕ активации подписки (чтобы избежать race condition)
+    existing_peer = await crud.get_vpn_peer_by_user_id(session, user.id)
+    is_new_subscription = not existing_peer
     
     # Если это новая подписка (peer еще не создан), создаем peer
     if is_new_subscription:
         try:
             # Используем expires_at из подписки для expire_at пира
+            # create_vpn_peer_for_user добавляет peer на WireGuard сервер, но НЕ делает commit
             peer = await crud.create_vpn_peer_for_user(session, user.id, expire_at=subscription.expires_at)
             # Peer автоматически добавляется на WireGuard сервер в create_vpn_peer_for_user
+            # После успешного создания peer делаем единый commit для подписки и peer
+            await session.commit()
+            await session.refresh(subscription)
+            await session.refresh(peer)
         except ValueError as e:
-            # Если у пользователя уже есть активный пир - возвращаем ошибку
-            import logging
-            logger = logging.getLogger(__name__)
+            # Если у пользователя уже есть активный пир - откатываем подписку и возвращаем ошибку
             logger.warning(f"[activate_test_subscription] {e}")
+            await session.rollback()
             raise HTTPException(status_code=400, detail=str(e))
         except Exception as e:
-            # Логируем ошибку, но не прерываем активацию подписки
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.error(f"[activate_test_subscription] Ошибка при создании peer для user_id={user.id}: {e}")
+            # Логируем ошибку и откатываем активацию подписки, если peer не создан
+            logger.error(
+                f"[activate_test_subscription] Ошибка при создании peer для user_id={user.id}: {e}",
+                exc_info=True
+            )
+            # ВАЖНО: Откатываем подписку, если peer не создан
+            await session.rollback()
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to create VPN peer. Subscription was not activated. Error: {str(e)}"
+            )
+    else:
+        # Если peer уже существует, просто коммитим подписку
+        await session.commit()
+        await session.refresh(subscription)
     
     return schemas.SubscriptionResponse.model_validate(subscription.__dict__, from_attributes=True)

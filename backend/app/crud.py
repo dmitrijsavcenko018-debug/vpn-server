@@ -111,8 +111,9 @@ async def activate_subscription_by_months(session: AsyncSession, user: User, mon
             )
             session.add(subscription)
     
-    await session.commit()
-    await session.refresh(subscription)
+    # НЕ делаем commit здесь - пусть вызывающий код делает commit после создания peer
+    # await session.commit()
+    # await session.refresh(subscription)
     return subscription
 
 
@@ -133,8 +134,9 @@ async def activate_test_subscription(session: AsyncSession, user: User) -> Subsc
         expires_at=expires_at,
         )
     session.add(subscription)
-    await session.commit()
-    await session.refresh(subscription)
+    # НЕ делаем commit здесь - пусть вызывающий код делает commit после создания peer
+    # await session.commit()
+    # await session.refresh(subscription)
     return subscription
 
 
@@ -315,10 +317,12 @@ async def create_vpn_peer_for_user(session: AsyncSession, user_id: int, expire_a
         expire_at=expire_at,
     )
     session.add(peer)
-    await session.commit()
-    await session.refresh(peer)
+    # НЕ делаем commit здесь - пусть вызывающий код делает commit после проверки
+    # Это позволяет атомарно коммитить подписку и peer вместе
+    # await session.commit()
+    # await session.refresh(peer)
     
-    logger.info(f"[create_vpn_peer_for_user] Peer успешно создан в БД для user_id={user_id}, peer_id={peer.id}")
+    logger.info(f"[create_vpn_peer_for_user] Peer подготовлен для сохранения в БД для user_id={user_id}")
     return peer
 
 
