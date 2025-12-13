@@ -1,4 +1,4 @@
-name: Deploy to Production
+name: Deploy to Server
 
 on:
   push:
@@ -22,6 +22,6 @@ jobs:
         script: |
           cd /root/vpn-server
           git pull
-          docker-compose down
-          docker-compose up -d --build
+          docker-compose down || docker compose down
+          docker-compose up -d --build || docker compose up -d --build
 
