@@ -28,7 +28,7 @@ async def disable_expired_vpn_peers_loop() -> None:
     while True:
         try:
             
-            logger.debug("[disable_expired_vpn_peers_loop] Начало проверки просроченных VPN-пиров")
+            logger.info("[disable_expired_vpn_peers_loop] Начало проверки просроченных VPN-пиров")
             now = datetime.utcnow()
             
             # Создаем новую сессию для этой итерации
@@ -54,6 +54,27 @@ async def disable_expired_vpn_peers_loop() -> None:
                             )
                             # Используем существующую функцию отключения пира
                             success = await crud.revoke_wireguard_peer(session, peer)
+                            if success:
+                                # Уведомление пользователю после отключения
+                                try:
+                                    from .models import User, Subscription
+                                    user_result = await session.execute(select(User).where(User.id == peer.user_id))
+                                    user = user_result.scalar_one_or_none()
+                                    if user and user.telegram_id:
+                                        sub_result = await session.execute(
+                                            select(Subscription).where(Subscription.user_id == user.id).order_by(Subscription.expires_at.desc()).limit(1)
+                                        )
+                                        sub = sub_result.scalar_one_or_none()
+                                        if sub:
+                                            already_sent = await crud.check_notification_sent(session, sub.id, "expired_disabled")
+                                            if not already_sent:
+                                                text = "⛔️ Подписка закончилась, доступ к VPN отключён.\n\nЧтобы снова включить VPN — откройте бота и продлите подписку."
+                                                ok = await send_telegram_message(user.telegram_id, text)
+                                                if ok:
+                                                    await crud.mark_notification_sent(session, user.id, sub.id, "expired_disabled")
+                                                    logger.info(f"[disable_expired_vpn_peers_loop] expired_disabled sent: user_id={user.id} peer_id={peer.id}")
+                                except Exception as notify_error:
+                                    logger.exception(f"[disable_expired_vpn_peers_loop] error sending expired_disabled notify")
                             if success:
                                 logger.info(f"[disable_expired_vpn_peers_loop] Peer {peer.id} успешно отключен")
                             else:
@@ -140,10 +161,17 @@ async def notify_expiring_soon_loop() -> None:
                             telegram_id = user.telegram_id
                             
                             # Формируем текст сообщения
-                            expires_date_str = subscription.expires_at.strftime("%d.%m.%Y")
                             message_text = (
                                 f"🔔 <b>Напоминание о подписке</b>\n\n"
                                 f"Ваш доступ к VPN заканчивается <b>через 3 дня</b> ({expires_date_str}).\n\n"
+                                f"Чтобы продолжить пользоваться VPN, не забудьте продлить подписку!"
+                            )
+"
+
+"
+                                f"Ваш доступ к VPN заканчивается <b>через 3 дня</b> ({expires_date_str}).
+
+"
                                 f"Чтобы продолжить пользоваться VPN, не забудьте продлить подписку!"
                             )
                             
@@ -235,6 +263,125 @@ def _check_wireguard_health() -> tuple[bool, str]:
         return False, f"Неожиданная ошибка при проверке WireGuard: {str(e)}"
 
 
+
+from .notifications import send_telegram_message
+
+logger = logging.getLogger(__name__)
+
+
+async def notify_expiring_subscriptions_24h_loop() -> None:
+    """
+    Фоновая задача, которая периодически проверяет подписки, истекающие через 24 часа,
+    и отправляет пользователям уведомления в Telegram.
+    Проверка выполняется каждые 10 минут.
+    """
+    logger.info("[notify_expiring_subscriptions_24h_loop] Запуск фоновой задачи для отправки уведомлений за 24 часа до истечения")
+    
+    while True:
+        try:
+            # Пауза 10 минут (600 секунд) перед первой проверкой
+            await asyncio.sleep(600)
+            
+            logger.debug("[notify_expiring_subscriptions_24h_loop] Начало проверки подписок, истекающих через 24 часа")
+            now = datetime.utcnow()
+            
+            # Вычисляем диапазон: от now + 23h 50min до now + 24h 10min (окно 20 минут для надежности)
+            target_date_start = now + timedelta(hours=23, minutes=50)
+            target_date_end = now + timedelta(hours=24, minutes=10)
+            
+            # Создаем новую сессию для этой итерации
+            async with async_session() as session:
+                # Находим все активные подписки, которые истекают через ~24 часа
+                result = await session.execute(
+                    select(Subscription)
+                    .options(selectinload(Subscription.user))
+                    .where(
+                        Subscription.expires_at >= target_date_start,
+                        Subscription.expires_at < target_date_end,
+                        Subscription.status == "active"
+                    )
+                )
+                expiring_subscriptions = result.scalars().all()
+                
+                if expiring_subscriptions:
+                    logger.info(
+                        f"[notify_expiring_subscriptions_24h_loop] Найдено {len(expiring_subscriptions)} подписок, "
+                        f"истекающих через 24 часа"
+                    )
+                    
+                    for subscription in expiring_subscriptions:
+                        try:
+                            # Проверяем, не отправляли ли уже уведомление
+                            already_sent = await crud.check_notification_sent(session, subscription.id, "expiring_24h")
+                            if already_sent:
+                                logger.debug(
+                                    f"[notify_expiring_subscriptions_24h_loop] Уведомление expiring_24h уже отправлено для subscription_id={subscription.id}"
+                                )
+                                continue
+                            
+                            # Получаем пользователя (уже загружен через selectinload)
+                            user = subscription.user
+                            
+                            if not user:
+                                logger.warning(
+                                    f"[notify_expiring_subscriptions_24h_loop] Не найден пользователь для subscription_id={subscription.id}"
+                                )
+                                continue
+                            
+                            telegram_id = user.telegram_id
+                            
+                            # Формируем текст сообщения
+                            message_text = (
+                                f"⏳ <b>Подписка скоро закончится</b>\n\n"
+                                f"Окончание: {expires_date_str}\n"
+                                f"Нажмите «Продлить» в боте."
+                            )
+                                f"Окончание: {expires_date_str}
+"
+                                f"Нажмите «Продлить» в боте."
+                            )
+                            
+                            logger.info(
+                                f"[notify_expiring_subscriptions_24h_loop] Отправка уведомления expiring_24h: "
+                                f"subscription_id={subscription.id}, user_id={user.id}, telegram_id={telegram_id}, expires_at={subscription.expires_at}"
+                            )
+                            
+                            # Отправляем уведомление
+                            success = await send_telegram_message(telegram_id, message_text)
+                            
+                            if success:
+                                # Помечаем, что уведомление отправлено
+                                await crud.mark_notification_sent(session, user.id, subscription.id, "expiring_24h")
+                                logger.info(
+                                    f"[notify_expiring_subscriptions_24h_loop] Уведомление expiring_24h успешно отправлено и помечено "
+                                    f"subscription_id={subscription.id}"
+                                )
+                            else:
+                                logger.warning(
+                                    f"[notify_expiring_subscriptions_24h_loop] Не удалось отправить уведомление expiring_24h "
+                                    f"subscription_id={subscription.id}, telegram_id={telegram_id}"
+                                )
+                                # Не помечаем как отправленное, чтобы попробовать еще раз позже
+                                
+                        except Exception as e:
+                            logger.error(
+                                f"[notify_expiring_subscriptions_24h_loop] Ошибка при обработке subscription_id={subscription.id}: {e}",
+                                exc_info=True
+                            )
+                            # Продолжаем обработку других подписок
+                else:
+                    logger.debug("[notify_expiring_subscriptions_24h_loop] Подписок для уведомления не найдено")
+                    
+        except asyncio.CancelledError:
+            logger.info("[notify_expiring_subscriptions_24h_loop] Задача отменена")
+            break
+        except Exception as e:
+            logger.error(
+                f"[notify_expiring_subscriptions_24h_loop] Критическая ошибка в фоновой задаче: {e}",
+                exc_info=True
+            )
+            # Пауза перед следующей попыткой
+
 async def monitor_health_loop(session_maker: async_sessionmaker[AsyncSession]) -> None:
     """
     Фоновая задача для мониторинга здоровья системы (БД и WireGuard).
@@ -263,7 +410,9 @@ async def monitor_health_loop(session_maker: async_sessionmaker[AsyncSession]) -
                     if db_last_error_time:
                         # БД восстановилась после ошибки
                         logger.info("[monitor_health_loop] БД восстановлена после ошибки")
-                        await send_admin_alert("✅ <b>БД восстановлена</b>\n\nБаза данных снова доступна.")
+                        await send_admin_alert("✅ <b>БД восстановлена</b>
+
+База данных снова доступна.")
                         db_last_error_time = None
                     
                     logger.debug("[monitor_health_loop] Проверка БД: OK")
@@ -273,7 +422,10 @@ async def monitor_health_loop(session_maker: async_sessionmaker[AsyncSession]) -
                 
                 # Отправляем алерт только если прошло достаточно времени с последней ошибки
                 if not db_last_error_time or (now - db_last_error_time) > error_cooldown:
-                    error_msg = f"❌ <b>Ошибка БД</b>\n\nБаза данных недоступна:\n<code>{str(db_error)}</code>"
+                    error_msg = f"❌ <b>Ошибка БД</b>
+
+База данных недоступна:
+<code>{str(db_error)}</code>"
                     logger.error(f"[monitor_health_loop] Ошибка проверки БД: {db_error}", exc_info=True)
                     await send_admin_alert(error_msg)
                     db_last_error_time = now
@@ -286,7 +438,10 @@ async def monitor_health_loop(session_maker: async_sessionmaker[AsyncSession]) -
                 
                 # Отправляем алерт только если прошло достаточно времени с последней ошибки
                 if not wg_last_error_time or (now - wg_last_error_time) > error_cooldown:
-                    error_msg = f"❌ <b>Ошибка WireGuard</b>\n\nWireGuard wg0 недоступен:\n<code>{wg_error}</code>"
+                    error_msg = f"❌ <b>Ошибка WireGuard</b>
+
+WireGuard wg0 недоступен:
+<code>{wg_error}</code>"
                     logger.error(f"[monitor_health_loop] Ошибка проверки WireGuard: {wg_error}")
                     await send_admin_alert(error_msg)
                     wg_last_error_time = now
@@ -295,7 +450,9 @@ async def monitor_health_loop(session_maker: async_sessionmaker[AsyncSession]) -
                 if wg_last_error_time:
                     # WireGuard восстановился после ошибки
                     logger.info("[monitor_health_loop] WireGuard восстановлен после ошибки")
-                    await send_admin_alert("✅ <b>WireGuard восстановлен</b>\n\nИнтерфейс wg0 снова доступен.")
+                    await send_admin_alert("✅ <b>WireGuard восстановлен</b>
+
+Интерфейс wg0 снова доступен.")
                     wg_last_error_time = None
                 
                 logger.debug("[monitor_health_loop] Проверка WireGuard: OK")
@@ -305,7 +462,10 @@ async def monitor_health_loop(session_maker: async_sessionmaker[AsyncSession]) -
             break
         except Exception as e:
             error_type = type(e).__name__
-            error_msg = f"❌ <b>monitor_health_loop: ошибка</b>\n\nТип ошибки: <code>{error_type}</code>\nСообщение: <code>{str(e)}</code>"
+            error_msg = f"❌ <b>monitor_health_loop: ошибка</b>
+
+Тип ошибки: <code>{error_type}</code>
+Сообщение: <code>{str(e)}</code>"
             logger.error(
                 f"[monitor_health_loop] Критическая ошибка в фоновой задаче мониторинга: {e}",
                 exc_info=True

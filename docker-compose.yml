@@ -21,8 +21,6 @@ services:
       - .env
     depends_on:
       - db
-    ports:
-      - "8000:8000"
     volumes:
       - /etc/wireguard:/etc/wireguard
     cap_add:
@@ -48,6 +46,9 @@ services:
       - .env
     depends_on:
       - backend
+    environment:
+      BOT_TOKEN: ${BOT_TOKEN}
+      BACKEND_URL: http://backend:8000
     dns:
       - 8.8.8.8
       - 1.1.1.1

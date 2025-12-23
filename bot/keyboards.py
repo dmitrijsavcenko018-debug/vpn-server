@@ -18,6 +18,9 @@ main_menu_keyboard = ReplyKeyboardMarkup(
         [
             KeyboardButton(text="👤 Личный кабинет"),
         ],
+        [
+            KeyboardButton(text="🛠 Техническая поддержка"),
+        ],
     ],
 )
 

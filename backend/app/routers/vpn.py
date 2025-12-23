@@ -52,6 +52,7 @@ def _render_config(private_key: str, address: str, preshared_key: str | None = N
     
     config_lines.extend([
         f"Endpoint = {settings.wg_host.strip()}:{settings.wg_port}",
+
         "AllowedIPs = 0.0.0.0/0, ::/0",
         "PersistentKeepalive = 25",
     ])

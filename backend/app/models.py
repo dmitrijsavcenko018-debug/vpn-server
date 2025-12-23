@@ -55,3 +55,13 @@ class VpnPeer(Base):
     def is_revoked(self) -> bool:
         """Проверяет, отозван ли peer (revoked_at установлен или is_active=False)"""
         return self.revoked_at is not None or not self.is_active
+
+
+class SubscriptionNotification(Base):
+    __tablename__ = "subscription_notifications"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    subscription_id: Mapped[int | None] = mapped_column(ForeignKey("subscriptions.id", ondelete="CASCADE"), nullable=True)
+    kind: Mapped[str] = mapped_column(String(50), nullable=False)
+    sent_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)

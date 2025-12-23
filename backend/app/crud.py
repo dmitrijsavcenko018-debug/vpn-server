@@ -439,3 +439,45 @@ async def revoke_expired_peers(session: AsyncSession) -> int:
     
     await session.commit()
     return revoked_count
+
+
+async def check_notification_sent(session: AsyncSession, subscription_id: int, kind: str) -> bool:
+    """
+    Проверяет, было ли отправлено уведомление определенного типа для подписки.
+    
+    Args:
+        session: Сессия БД
+        subscription_id: ID подписки
+        kind: Тип уведомления ("expiring_24h" или "expired_disabled")
+    
+    Returns:
+        True если уведомление уже отправлено, False если нет
+    """
+    from .models import SubscriptionNotification
+    result = await session.execute(
+        select(SubscriptionNotification).where(
+            SubscriptionNotification.subscription_id == subscription_id,
+            SubscriptionNotification.kind == kind
+        )
+    )
+    return result.scalar_one_or_none() is not None
+
+
+async def mark_notification_sent(session: AsyncSession, user_id: int, subscription_id: int | None, kind: str) -> None:
+    """
+    Помечает уведомление как отправленное.
+    
+    Args:
+        session: Сессия БД
+        user_id: ID пользователя
+        subscription_id: ID подписки (может быть None)
+        kind: Тип уведомления
+    """
+    from .models import SubscriptionNotification
+    notification = SubscriptionNotification(
+        user_id=user_id,
+        subscription_id=subscription_id,
+        kind=kind
+    )
+    session.add(notification)
+    await session.commit()

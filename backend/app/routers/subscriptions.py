@@ -92,9 +92,20 @@ async def activate_subscription(
                 detail=f"Failed to create VPN peer. Subscription was not activated. Error: {str(e)}"
             )
     else:
-        # Если peer уже существует, просто коммитим подписку
+        # Если peer уже существует, обновляем expire_at peer'а при продлении подписки
+        logger.info(
+            f"[activate_subscription] Найден существующий peer для продления: user_id={user.id}, peer_id={existing_peer.id}, is_active={existing_peer.is_active}"
+        )
+        old_expire_at = existing_peer.expire_at
+        existing_peer.expire_at = subscription.expires_at
+        logger.info(
+            f"[activate_subscription] Обновлен peer.expire_at при продлении подписки: "
+            f"user_id={user.id}, peer_id={existing_peer.id}, "
+            f"old_expire_at={old_expire_at}, new_expire_at={subscription.expires_at}"
+        )
         await session.commit()
         await session.refresh(subscription)
+        await session.refresh(existing_peer)
     
     return schemas.SubscriptionResponse.model_validate(subscription.__dict__, from_attributes=True)
 
@@ -149,8 +160,19 @@ async def activate_test_subscription(
                 detail=f"Failed to create VPN peer. Subscription was not activated. Error: {str(e)}"
             )
     else:
-        # Если peer уже существует, просто коммитим подписку
+        # Если peer уже существует, обновляем expire_at peer'а при продлении подписки
+        logger.info(
+            f"[activate_test_subscription] Найден существующий peer для продления: user_id={user.id}, peer_id={existing_peer.id}, is_active={existing_peer.is_active}"
+        )
+        old_expire_at = existing_peer.expire_at
+        existing_peer.expire_at = subscription.expires_at
+        logger.info(
+            f"[activate_test_subscription] Обновлен peer.expire_at при продлении подписки: "
+            f"user_id={user.id}, peer_id={existing_peer.id}, "
+            f"old_expire_at={old_expire_at}, new_expire_at={subscription.expires_at}"
+        )
         await session.commit()
         await session.refresh(subscription)
+        await session.refresh(existing_peer)
     
     return schemas.SubscriptionResponse.model_validate(subscription.__dict__, from_attributes=True)

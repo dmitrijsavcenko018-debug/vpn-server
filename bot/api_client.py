@@ -71,3 +71,36 @@ class ApiClient:
 
     async def get_vpn_config(self, telegram_id: int) -> Any:
         return await self._request("GET", f"/api/vpn/config/{telegram_id}")
+
+    async def get_admin_stats(self) -> Any:
+        """Получить статистику для админ-панели"""
+        return await self._request("GET", "/api/admin/stats")
+
+    async def get_admin_expiring(self) -> Any:
+        """Получить список подписок, истекающих в ближайшие 24 часа"""
+        return await self._request("GET", "/api/admin/expiring")
+
+    async def get_admin_revoked(self) -> Any:
+        """Получить список отключенных peer за последние 24 часа"""
+        return await self._request("GET", "/api/admin/revoked")
+
+    async def get_admin_user_info(self, telegram_id: int) -> Any:
+        """Получить информацию о пользователе по telegram_id"""
+        return await self._request("GET", f"/api/admin/user/{telegram_id}")
+
+
+
+
+
+
+    async def admin_disable_user(self, telegram_id: int) -> dict:
+        """Отключить VPN для пользователя (отозвать активный peer)"""
+        return await self._request("POST", f"/api/admin/user/{telegram_id}/disable")
+
+    async def admin_enable_user(self, telegram_id: int) -> dict:
+        """Включить VPN для пользователя (создать новый peer)"""
+        return await self._request("POST", f"/api/admin/user/{telegram_id}/enable")
+
+    async def admin_users(self, limit: int = 15, offset: int = 0) -> dict:
+        """Получить список пользователей для админ-панели"""
+        return await self._request("GET", f"/api/admin/users?limit={limit}&offset={offset}")
