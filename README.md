@@ -49,3 +49,23 @@
 - `GET /api/vpn/config/{telegram_id}`
 
 Бот использует эти эндпоинты для работы команд `/start`, `/status`, `/buy`, `/config`.
+
+---
+
+## Frontend: Sector14 (Next.js)
+
+В репозитории добавлен отдельный фронтенд в папке `frontend`.
+
+### Запуск
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+### Основные страницы
+
+- `/` — лендинг с тарифами, шагами подключения и кнопками приложений
+- `/cabinet` — mock личный кабинет с состоянием подписки
+- `/api/subscription` — API route с mock статусом подписки
