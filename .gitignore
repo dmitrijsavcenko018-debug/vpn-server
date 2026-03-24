@@ -4,3 +4,10 @@ __pycache__/
 *.pyc
 *.db
 .alembic
+
+backend/data.sqlite
+
+sector14/backend/data.sqlite
+sector14/backend/node_modules/
+sector14/frontend/node_modules/
+sector14/frontend/.next/

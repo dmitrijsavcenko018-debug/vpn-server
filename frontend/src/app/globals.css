@@ -1,0 +1,25 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  @apply bg-bg text-white antialiased;
+  background-image: radial-gradient(circle at top right, rgba(79, 125, 255, 0.2), transparent 35%),
+    radial-gradient(circle at bottom left, rgba(61, 216, 165, 0.15), transparent 40%);
+}
+
+.card {
+  @apply rounded-2xl border border-white/10 bg-surface/80 backdrop-blur;
+}
+
+.btn-primary {
+  @apply inline-flex w-full items-center justify-center rounded-xl bg-accent px-5 py-4 text-base font-semibold text-white transition-all duration-300 hover:scale-[1.02] hover:bg-[#628dff] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/80;
+}
+
+.btn-secondary {
+  @apply inline-flex w-full items-center justify-center rounded-xl border border-white/20 bg-white/5 px-5 py-4 text-base font-semibold text-white transition-all duration-300 hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/80;
+}
